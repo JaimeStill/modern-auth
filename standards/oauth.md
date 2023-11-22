@@ -225,15 +225,16 @@ Here, one backend needs to be granted access to the other. We'll call the first 
 
 ```mermaid
 sequenceDiagram
+    autonumber
     participant tm as Todo Microservice
     participant oauth as OAuth
     participant sm as Social Microservice
     participant sa as Social API
-    tm->>oauth: Requests access token(1)
-    oauth-->>tm: Sends token(2)
-    tm->>sm: Presents token(3)
-    sm-->>oauth: Validates ToDo token (4)
-    sm->>sa: Generates Post (5)
+    tm->>oauth: Requests access token
+    oauth-->>tm: Sends token
+    tm->>sm: Presents token
+    sm-->>oauth: Validates ToDo token
+    sm->>sa: Generates Post
 ```
 
 The workflow for this mode looks like:
