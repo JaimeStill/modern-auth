@@ -43,7 +43,7 @@ Theres a lot of differentw ays you can use OAuth. That's the power and danger of
 
 The **Local login and registration** mode is when you are using an OAuth workflow to register or log users into your application. In this mode, you own both the OAuth server and the application. You might not have written the OAuth server, but you control it. In fact, this mode usually feels like the user is signing up or logging directly into your application via **native forms** and there is no delegation at all.
 
-The only difference between native forms and teh **Local login and registration** OAuth mode is that with the latter you delegate the login and registration process to an OAuth server rather than writing everything by hand. Additionally, since you control the OAuth server and your application, it would be odd to ask the user to "authorize" your application. Therefore, this mode does not include the permission grant screens.
+The only difference between native forms and the **Local login and registration** OAuth mode is that with the latter you delegate the login and registration process to an OAuth server rather than writing everything by hand. Additionally, since you control the OAuth server and your application, it would be odd to ask the user to "authorize" your application. Therefore, this mode does not include the permission grant screens.
 
 The workflow for this mode looks like:
 
@@ -71,7 +71,7 @@ The workflow for this mode looks like:
 
 12. The OAuth server confirms their identity.
 
-13. The OAuth server redirects the browser back tot he app, which logs the user in.
+13. The OAuth server redirects the browser back to the app, which logs the user in.
 
 14. The user interacts with the app, checking off ToDos.
 
@@ -276,3 +276,277 @@ The workflow for this mode is as follows:
 This mode often takes a bit of time to complete because the app on the Apple TV is polling the OAuth server.
 
 > See [OAuth Device Authorization](https://fusionauth.io/articles/oauth/oauth-device-authorization) for a detailed look at device authorization.
+
+## OAuth Grants
+
+Grants are authentication flows for obtaining access tokens from the Authorization Server. The grant encapsulates a process, data flow and rules used to generate a token. The core OAuth2 grants (as outlined in [RFC 6749](https://datatracker.ietf.org/doc/html/rfc6749)) are:
+
+* **Authorization Code** - This grant has a one time authorization code generated after authentication. This is exchanged for the token using server-side code.
+* **Implicit** - A simplified flow to be used by browser-based applications implemented with JavaScript.
+    * This is a legacy grant. Don't use this grant.
+* **Resource Owner's Password Credentials** - Helpful when the username and password are required for authorization. Also called the Password grant. It should only be used if there is a high level of trust between the Resource Owner and the third-party application or for migration from legacy systems to OAuth2.
+* **Client Credentials** - A useful grant when the application is trying to act on behalf of itself without the user's presence. An example is a Printing website calling into an Invoice Generation service to create invoices for the prints. This is not done for any user, but instead for the Printing website itself.
+* **Device** - Enables users to gain access to an application or device by allowing it to use account information from another application or device.
+
+These are the core grants, but there are others that have been standardized over the years. [Learn more about these grants](https://fusionauth.io/articles/oauth/complete-list-oauth-grants).
+
+### Authorization Code Grant
+
+This is the most common OAuth grant and also the most secure when a user is involved. It relies on a user interacting with a browser in order to handle OAuth modes 1 through 6 above. This grant requires the interaction of a user, so it isn't usable for the **Machine-to-machine authorization** mode. All of the interactive modes we covered above involve the same parties and UI, except when a *permission grant screen* is displayed.
+
+Terms to understand:
+
+* **Authorize endpoint:** This is the location that starts the workflow and is a URL that the browser is taken to. Normally, users register or log in at this location.
+* **Authorization code:** This is a random string of printable ASCII characters that the OAuth server includes in the redirect after the user has registered or logged in. This is exchanged for tokens by the application backend.
+* **Token endpoint:** This is an API that is used to get tokens from the OAuth server after the user has logged in. The application backend uses the **Authorization code** when it calls the **Token endpoint**.
+
+In this section, we will also cover PKCE (Proof Key for Code Exchange - pronounced Pixy). PKCE is a security layer that sits on top of the Authorization Code grant to ensure that authorization codes can't be stolen or reused. The application generates a secret key (called the code verifier) and hashes it using SHA-256. This hash is one-way, so it can't be reversed by an attacker. The application sends the has to the OAuth server, which stores it. Later, when the application is getting tokens from the OAuth server, the application will send the server the secret key and the OAuth server will verify that the hash of the provided secret key matches the previously provided value. This is a good protection against attackers that can intercept the authorization code, but don't have the secret key.
+
+> **Note:** PKCE is not requierd for the Authorization Code grant when the application backend is passing both the `client_id` and `client_secret` to the Token endpoint. PKCE is orthogonal to client authentication and offers a dynamic secret. Using PKCE prevents CSRF and authorization code injection attacks. Depending on your implementation, you might be able to safely skip implementing PKCE.
+
+The following sections will look at how to implement this grant using a prebuilt OAuth server.
+
+#### Login/Register Buttons
+
+First, add a *Login* or *My Account* link or button to the application; or if you are using one of the federated authorizatio nmodes fro mabove (for example the **Third-party service authorization** mode), you'll add a *Connect to XYZ* link or button. There are two ways to connect this link or button to the OAuth server:
+
+1. Set the `href` of the link to the full URL that starts the OAuth Authorization Code grant.
+2. Set the `href` to point to the application backend code that does a redirect.
+
+Option #1 is an older integration that is often not used in practice. There are a couple of reasons for this. First, the URL is long and not all that nice looking. Second, if you are going to use any enhanced security measures like PKCE, you'll need to write code that generates extra pieces of data for the redirect.
+
+First, you'll need to determine the URL that starts the Authorization Code grant with the OAuth server as well as include all of the necessary parameters required by the specification. We'll use [FusionAuth](https://fusionauth.io/docs/get-started/) as an example, since it has a consistent URL pattern.
+
+Let's say you are running FusionAuth and it is deployed to `https://login.twgtl.com`. The URL for the OAuth authorize endpoint will also be located at:
+
+```
+https://login.twgtl.com/oauth2/authorize
+```
+
+Next, you would insert this URL with a bunch of parameters into an anchor tag like this:
+
+```html
+<a href="https://login.twgtl.com/oauth2/authorize?[a bunch of parameters here]">
+    Login
+</a>
+```
+
+This anchor tag would take the user directly to the OAuth server to start the Authorization Code grant. This method is not generally used.
+
+Let's look at how Option #2 is implemented. Rather than point the anchor tag directly at the OAuth server, we'll point it at the TWGTL backend; let's use the path `/login`. To make everythign work, we need to write code that will handle the request for `/login` and redirect the browser to the OAuth server. Here's the updated anchor tag that points at the backend controller:
+
+```html
+<a href="https://app.twgtl.com/login">
+    Login
+</a>
+```
+
+Next, we need to write the controller for `/login` in the application. Here's a JavaScript snippet using NodeJS/Express that accomplishes this:
+
+```js
+router.get('/login', function(req, res, next) {
+    res.redirect(302, 'https://login.twgtl.com/oauth2/authorize?[a bunch of parameters here]');
+});
+```
+
+> You can view [working code in this guide in the accompanying GitHub repository](https://github.com/FusionAuth/fusionauth-example-modern-guide-to-oauth).
+
+#### Authorize Endpoint Parameters
+
+This code immediately redirects the browser to the OAuth server. However, if you ran this code and clicked the link, the OAuth server will reject the request because it doesn't contain the required parameters. The parameters defined in the OAuth specification are:
+
+Parameter | Description
+----------|------------
+`client_id` | Identifies the application you are logging into. In OAuth, this is referred to as the `client`. This value will be provided to you by the OAuth server.
+`redirect_uri` | The URL in your application to which the OAuth server will redirect the user to after they log in. This URL must be registered with the OAuth server and it must poitn to a controller in your app (rather than a static page), because your app must do additional work after this URL is called.
+`state` | Technically this parameter is optional, but it is useful for preventing various security issues. This parameter is echoed back to your application by the OAuth server. It can be anything you might need to be persisted across the OAuth workflow. If you have no other need for this parameter, the suggestion is to set it to a large random string. If you need to have data persistsed across the workflow, ths suggestion is to URL encode the data and append a random string as well.
+`response_type` | Should always be set to `code` for this grant. This tells the OAuth server you are using the **Authorization Code** grant.
+`scope` | Also an optional parameter, but in some of the above modes, this will be required by the OAuth server. This parameter is a space separated list of strings. You might also need to include the `offline` scope in this list if you are planning on using refresh tokens in your application.
+`code_challenge` | An optional parameter, but provides support for PKCE. This is useful when there is not a backend that can handle the final steps of the Authorization Code grant. This is known as *public client*. There aren't many cases of applications that don't have backends, but if you have something like a mobile application and you aren't able to leverage a server-side backend for OAuth, you must implement PKCE to protect your application from security issues. The security issues surrounding PKCE are out of the scope of this guide, but you can find numerous articles online about them. PKCE is also recommended by the [OAuth 2.1 draft](https://fusionauth.io/articles/oauth/differences-between-oauth-2-oauth-2-1).
+`code_challenge_method` | An optional parameter, but if you implement PKCE, you must specify how your PKCE `code_challenge` parameter was created. It can either be `plain` or `S256`. `S256` is always preferred, which uses SHA-256 secure hashing for PKCE.
+`nonce` | An optional parameter, this is used for OpenID Connect. The `nonce` parameter will be included in the Id token that the OAuth server generates. This can be verified when retrieving the Id token.
+
+Here is updated code reflecting these values:
+
+```javascript
+const clientId = '9b893c2a-4689-41f8-91e0-aecad306ecb6';
+const redirectURI = encodeURI('https://app.twgtl.com/oauth-callback');
+// give the id_token and the refresh token
+const scopes = encodeURIComponent('profile offline_access openid');
+
+router.get('/login', (req, res, next) => {
+    const state = generateAndSaveState(req, res);
+    const codeChallenge = generateAndSaveCodeChallenge(req, res);
+    const nonce = generateAndSaveNonce(req, res);
+    res.redirect(302,
+        'https://login.twgtl.com/oauth/authorize' +
+            `?client_id=${clientId}` +
+            `&redirect_uri=${redirectURI}` +
+            `&state=${state}` +
+            `&response_type=code` +
+            `&scope=${scopes}` +
+            `&code_challenge=${codeChallenge}` +
+            `&code_challenge_method=S256` +
+            `&nonce=${nonce}`
+    );
+});
+```
+
+You'll notice that the following have been specified: the `client_id`, which was likely provided to us by the OAuth server, the `redirect_uri`, which is part of the application, and a `scope` with the values `profile`, `offline_access`, and `openid` (space separated). These are all usually hardcoded values since they rarely change. The other values change each time a request is made and are generated in the controller.
+
+The `scope` parameter is used by the OAuth server to determine what authorizaton the application is requesting. There are a couple of standard values that are defined as part of OpenID Connect. These include `profile`, `offline_access` and `openid`. The OAuth specification does not define any standard scopes, but most OAuth servers support different values. Consult your OAuth server documentation to determine the scopes you'll need to provide.
+
+Here are definitions of the standard scopes in the OpenID Connect specification:
+
+Scope | Definition
+------|-----------
+`openid` | Tells the OAuth server to use OpenID Connect for the handling of the OAuth workflow. This additionally will tell the OAuth server to return an Id token from the Token endpoint.
+`offline_access` | Tells the OAuth server to generate and return a refresh token from the Token endpoint.
+`profile` | Tells the OAuth server to include all of the standard OpenID Connect claims in the returned tokens (access and/or id tokens).
+`email` | Tells the OAuth server to include the user's email in the returned tokens (access and/or id tokens).
+`address` | Tells the OAuth server to include the user's address in the returned tokens (access and/or id tokens).
+`phone` | Tells the OAuth server to include the user's phone number in the returned tokens (access and/or id tokens).
+
+In order to properly implement the handling for the `state`, PKCE, and `nonce` parameters, we need to save these values off somewhere. They must be persisted across browser requests and redirects. There are two options for this:
+
+1. Store the values in a server-side session.
+2. Store the values in secure, http-only cookies (preferably encrypted).
+
+> **You might choose cookies if you are building a SPA and want to avoid maintaining server side sessions.**
+
+Here is an excerpt of the above `login` route with functions that generate these values:
+
+```javascript
+// ...
+router.get('/login', (req, res, next) => {
+    const state = generateAndSaveState(req, res);
+    const codeChallenge = generateAndSaveCodeChallenge(req, res);
+    const nonce = generateAndSaveNonce(req, res);
+})
+// ...
+```
+
+Both of these options will be covered. Here is the code for each of the `generate*` functions and server-side session storage:
+
+```javascript
+const crypto = require('crypto');
+// ...
+// Helper method for Base 64 encoding that is URL safe
+function base64URLEncode(str) {
+    return str.toString('base64')
+        .replace(/\+/g, '-')
+        .replace(/\//g, '_')
+        .replace(/=/g, '');
+}
+
+function sha256(buffer) {
+    return crypto.createHash('sha256')
+        .update(buffer)
+        .digest();
+}
+
+function generateAndSaveState(req) {
+    const state = base64URLEncode(crypto.randomBytes(64));
+    req.session.oauthState = state;
+    return state;
+}
+
+function generateAndSaveCodeChallenge(req) {
+    const codeVerifier = base64URLEncode(crypto.randomBytes(64));
+    req.session.oauthCode = codeVerifier;
+    return base64URLEncode(sha256(codeVerifier));
+}
+
+function generateAndSaveNonce(req) {
+    const nonce = base64URLEncode(crypto.randomBytes(64));
+    req.session.oauthNonce = nonce;
+    return nonce;
+}
+```
+
+This code is using the `crypto` library to generate random bytes and converting those into URL safe strings. Each method is storing the values created in the session. You'll also notice that in the `generateAndSaveCodeChallenge` we are also hashing the random string using the `sha256` function. This is how PKCE is implemented when the code verifier is saved in the session and the hashed version of it is sent as a parameter to the OAuth server.
+
+Here's the same code (minus the require and helper methods) modified to store each of these values in secure, HTTP only cookies:
+
+```javascript
+// ...
+function generateAndSaveState(req, res) {
+    const state = base64URLEncode(crypto.randomBytes(64));
+    res.cookie(
+        'oauth_state',
+        state,
+        { httpOnly: true, secure: true }
+    );
+    return state;
+}
+
+function generateAndSaveCodeChallenge(req, res) {
+    const codeVerifier = base64URLEncode(crypto.randomBytes(64));
+    res.cookie(
+        'oauth_code_verifier',
+        codeVerifier,
+        { httpOnly: true, secure: true }
+    );
+    return base64URLEncode(sha256(codeVerifier));
+}
+
+function generateAndSaveNonce(req, res) {
+    const nonce = base64URLEncode(crypto.randomBytes(64));
+    res.cookie(
+        'oauth_nonce',
+        nonce,
+        { httpOnly: true, secure: true }
+    );
+    return nonce;
+}
+// ...
+```
+
+You might also be wondering if it is safe to be storing these values in cookies since cookies are sent back to the browser. We are setting each of these cookies to be both `httpOnly` and `secure`. These flags ensure that no malicious JavaScript code in the browser can read their values. If you want to secure this even further, you can also encrypt the values like this:
+
+``` javascript
+// ...
+const password = 'setec-astrononmy'
+const key = crypto.scryptSync(password, 'salt', 24);
+const iv = crypto.randomBytes(16);
+
+function encrypt(value) {
+    const cipher = crypto.createCipheriv('aes-192-cbc', key, iv);
+    let encrypted = cipher.update(value, 'utf8', 'hex');
+    encrypted += cipher.final('hex');
+    return encrypted + ':' + iv.toString('hex');
+}
+
+function generateAndSaveState(req, res) {
+    const state = base64URLEncode(crypto.randomBytes(64));
+    res.cookie(
+        'oauth_state',
+        encrypt(state),
+        { httpOnly: true, secure: true }
+    );
+    return state;
+}
+
+function generateAndSaveCodeChallenge(req, res) {
+    const codeVerifier = base64URLEncode(crypto.randomBytes(64));
+    res.cookie(
+        'oauth_code_verifier',
+        encrypt(codeVerifier),
+        { httpOnly: true, secure: true }
+    );
+    return base64URLEncode(sha256(codeVerifier));
+}
+
+function generateAndSaveNonce(req, res) {
+    const nonce = base64URLEncode(crypto.randomBytes(64));
+    res.cookie(
+        'oauth_nonce',
+        encrypt(nonce),
+        { httpOnly: true, secure: true }
+    );
+    return nonce;
+}
+// ...
+```
+
+Encryption is generally not needed, especially for the `state` and `nonce` parameters since those are sent as plaintext on the redirect anyways, but if you need ultimate security and want to use cookies, this is the best way to secure those values.

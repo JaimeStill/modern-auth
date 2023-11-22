@@ -17,6 +17,8 @@ The goals of this repository:
 
 * [OAuth](https://oauth.net/2/)
     * [OAuth Modern Guide](https://fusionauth.io/articles/oauth/modern-guide-to-oauth)
+        * [GitHub: OAuth Modern Guide Repository](https://github.com/FusionAuth/fusionauth-example-modern-guide-to-oauth)
+    * [OAuth Grants](https://fusionauth.io/articles/oauth/complete-list-oauth-grants)
     * [OAuth 2 Simplified](https://aaronparecki.com/oauth-2-simplified/)
     * [RFC 6749 - The OAuth 2.0 Authorization Framework](https://datatracker.ietf.org/doc/html/rfc6749)
 * [OpenID](https://openid.net/)
