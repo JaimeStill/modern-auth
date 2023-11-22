@@ -45,7 +45,7 @@ The **Local login and registration** mode is when you are using an OAuth workflo
 
 The only difference between native forms and teh **Local login and registration** OAuth mode is that with the latter you delegate the login and registration process to an OAuth server rather than writing everything by hand. Additionally, since you control the OAuth server and your application, it would be odd to ask the user to "authorize" your application. Therefore, this mode does not include the permission grant screens.
 
-How does this work in practice?
+The workflow for this mode looks like:
 
 1. A user visits and wants to sign up and manage their ToDos.
 
@@ -97,7 +97,7 @@ Social logins are the most common examples of this mode, but there are plenty of
 
 This mode is a good example of federated identity. Here, the user's identity (username and password) is stored in a third-party system. They are using that system to register or log in to your application.
 
-How does this work in practice?
+The workflow for this mode looks like:
 
 1. A user visits the app and wants to sign up and manage their ToDos.
 
@@ -151,14 +151,127 @@ The **Third-party login and registration** mode can work with the **Local login 
 
 The nice part about this workflow is that the app doesn't have to worry about integrating with Facebook (or any other provider) or reconciling the user's account. That's handled by the OAuth server. It's also possible to delegate to additional OAuth servers, easily adding "Login with Google" or "Login with Apple". You can also nest deeper than 2 levels illustrated here.
 
+### First-party Login and Registration
+
+The **First-party login and registration** mode is the inverse of the **Third-party login and registration** mode. Basically, if you happen to be Facebook in the [Third-party login and registration](#third-party-login-and-registration) examples above and your customer is the illustrated app, you are providing the OAuth server to the app. You are also providing a way from them to call your APis on behalf of your users.
+
+This type of setup is not just reserved for the massive social networks run by Silicon Valley moguls; more and more companies are offering this to their customers and partners, therefore becoming platforms. In many cases, companies are leveraging easily integratable auth systems to provide this feature.
+
 ### Enterprise Login and Registration
 
-### Machine-to-Machine Authorization
+The **Enterprise login and registration** mode is when your application allows users to sign up or log in with an enterprise identity provider such as a corporate Active Directory. This mode is very similar to the **Third-party login and registration** mode, but with a few salient differences.
 
-### Device Login and Registration
+First, it rarely requires the user to grant permissions to your application using a permission grant screen. Typically, a user does not have the option to grant or restrict permissions to your application. These permissions are usually managed by IT in an enterprise directory or in your application.
 
-### First-party Login and Registration
+Second, this mode does not apply to all users of an application. In most cases, this mode is only available to the subset of users who exist in the enterprise directory. The rest of your users will either log in directly to your application using **Local login and registration** or through the **Third-party login and registration** mode. In some cases, the user's email address determines the authentication source.
+
+You might have noticed some login forms only ask for your email on the first step:
+
+![email-requested-at-login](../assets/oauth/email-requested-at-login.png)
+
+Knowing a user's email domain allows the OAuth server to determine where to send the user to log in or if they should log in locally. If you work at Example Company, providing `brian@example.com` to the login screen allows the OAuth server to know that you are an employee and should be authenticated against a corporate authentication source. If instead you enter `dan@gmail.com`, you won't be authenticated against that directory.
+
+Outside of these differences, this mode behaves in much the same as the **Third-party login and registration** mode.
+
+This is the final mode where users can register and log in to your application. The remaining modes are used entirely for authorization, usually to application programming interfaces (APIs).
+
+### Third-party Service Authorization
+
+The **third-party service authorization** mode is quite different from the **Third-party login and registration** mode. Here, the user is already logged into your application. The login could have been through a native form or using the **Local login and registration** mode, the **Third-party login and registartion mode**, or the **Enterprise login and registration** mode. Since the user is already logged in, all they are doing is granting access for your application to call third-party APIs on their behalf.
+
+Lets say a user has an account with a ToDo app, but each time they complete a ToDo, they want to let their social followers know. To accomplish this, the ToDo app provides an integration that will automatically send a social post when the user completes a ToDo. The integration uses the social APIs and calling those requires an access token. In order to get an access token, the ToDo app needs to log the user into the social app via OAuth.
+
+To hook all of this up, the ToDo app needs to add a button to the user's profile page that says "Connect your social account". Notice it doesn't say "Login with social app" since the user is already logged in; the user's identity for the ToDo app is not delegated to the social app. Once the user clicks this button, they will be taken to the social app's OAuth server to log in and grant the necessary permissions for ToDo to social for them.
+
+Here's an example screenshot from Buffer, a service which posts to your social media accounts such as Twitter:
+
+![buffer-connect-prompt](../assets/oauth/buffer-connect-prompt.png)
+
+When you connect a Twitter account to Buffer, you'll see a screen like this:
+
+![buffer-connect-twitter](../assets/oauth/buffer-connect-twitter.png)
+
+The workflow for this mode looks like:
+
+1. A user visits the ToDo app and logs into their account.
+
+2. They click the *My Profile* link.
+
+3. On their account page, they click the *Connect your social account* button.
+
+4. This button takes them over to the socail app's OAuth server.
+
+5. They log in to the social app.
+
+6. The social app presents the user with the permission grant screen and asks if the ToDo app can post on their behalf.
+
+7. The user grants the ToDo app this permissions.
+
+8. The social app redirects the browser back to the ToDo app where it calls the social app's OAuth server to get an access token.
+
+9. The ToDo app stores the access token in its database and can now call social APIs on behalf of the user.
 
 ### First-party Service Authorization
 
-### Third-party Service Authorization
+The **First-party service authorization** mode is the inverse of the **Third-party service authorization** mode. When another application wishes to call your APIs on behalf of one of your users, you are in this mode. Here, your application is the "third-party service" discussed above. Your application asks the user if they want to grant the other application specific permissions. Basically, if you are building the next Facebook and want developers to be able to call your APIs on behalf of their users, you'll need to support this OAuth mode.
+
+With this mode, your OAuth server might display a "permission grant screen" to the user asking if they want to grant the third-party application permissions to your APIs. This isn't strictly necessary and depends on your requirements.
+
+### Machine-to-Machine Authorization
+
+The **Machine-to-machine authorization** OAuth mode is different from the previous modes we've covered. This mode does not involve users at all. Rather, it allows an application to interact with another application. Normally, this is backend services communicated with each other via APIs.
+
+Here, one backend needs to be granted access to the other. We'll call the first backend the source and the second backend the target. To accomplish this, the source authenticates with the OAuth server. The OAuth server confirms the identity of the source and then returns a token that the source will use to call the target. This token can also include permissinos that are used by the target to authorize the call the source is making.
+
+```mermaid
+sequenceDiagram
+    participant tm as Todo Microservice
+    participant oauth as OAuth
+    participant sm as Social Microservice
+    participant sa as Social API
+    tm->>oauth: Requests access token(1)
+    oauth-->>tm: Sends token(2)
+    tm->>sm: Presents token(3)
+    sm-->>oauth: Validates ToDo token (4)
+    sm->>sa: Generates Post (5)
+```
+
+The workflow for this mode looks like:
+
+1. The ToDo Microservice authenticates with the OAuth server.
+
+2. The OAuth server returns a token to the ToDo Microservice.
+
+3. The ToDo Microservice calls an API in the Social Microservice and includes the token in the request.
+
+4. The Social Microservice verifies the token by calling the OAuth server (or verifying the token itself if the token is a JWT).
+
+5. If the token is valid, the Social Microservice performs the operation.
+
+### Device Login and Registration
+
+The **Device login and registration** mode is used to log in to (or register) a user's account on a device that doesn't have a rich input device like a keyboard. In this case, a user connects the device to their account, usually to ensure their account is active and the device is allowed to use it.
+
+A good example of this mode is setting up a streaming app on an Apple TV, smart TV, or other device such as a Roku. In order to ensure you have a subscription to the streaming service, the app needs to verify the user's identity and connect to their account. The app on the Apple TV device displays a code and a URL and asks the user to vist the URL.
+
+The workflow for this mode is as follows:
+
+1. The user opens the app on the Apple TV.
+
+2. The app displays a code and a URL.
+
+3. The user types in the URL displayed by the Apple TV on their phone or computer.
+
+4. The user is taken to the OAuth server and asked for the code.
+
+5. The user submits this form and is taken to the login page.
+
+6. The user logs into the OAuth server.
+
+7. The user is taken to a *Finished* screen.
+
+8. A few seconds later, the device is connected to the user's account.
+
+This mode often takes a bit of time to complete because the app on the Apple TV is polling the OAuth server.
+
+> See [OAuth Device Authorization](https://fusionauth.io/articles/oauth/oauth-device-authorization) for a detailed look at device authorization.
