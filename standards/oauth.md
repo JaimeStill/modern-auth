@@ -963,3 +963,5 @@ async function getUserId(accessToken) {
     return null;
 }
 ```
+
+#### Local Login and Registration with the Authorization Code Grant
