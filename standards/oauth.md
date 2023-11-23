@@ -550,3 +550,267 @@ function generateAndSaveNonce(req, res) {
 ```
 
 Encryption is generally not needed, especially for the `state` and `nonce` parameters since those are sent as plaintext on the redirect anyways, but if you need ultimate security and want to use cookies, this is the best way to secure those values.
+
+#### Logging In
+
+At this point, the user will be taken to the OAuth server to log in or register. Techinically, the OAuth server can manage the login and registration process however it needs. In some cases, a login won't be necessary because the user will already be authenticated with the OAuth server or they can be authenticated by other means (smart cards, hardware devices, etc).
+
+The OAuth 2.0 specification doesn't specify anything about this process. In practice though, 99.999% of OAuth servers use a standard login page that collects the user's username and password. We'll assume that the OAuth server provides a standard login page and handles the collection of the user's credentials and verification of their validity.
+
+#### Redirect and Retrieve the Tokens
+
+After the user has logged in, the OAuth server redirects the **browser** back to the application. The exact location of the redirect is controlled by the `redirect_uri` parameter we passed on the URL above. In our example, this location is `https://app.twgtl.com/oauth-callback`. When the OAuth server redirects the browser back to this location, it will add a few parameters to the URL. These are:
+
+* `code` - this is the authorization code that the OAuth server created after the user was logged in. This code will be exchanged for tokens.
+
+* `state` - this is the same value of the `state` parameter passed to the OAuth server. This is echoed back to the application so that the application can verify that the `code` came from the correct location.
+
+OAuth servers can add additional parameters as needed, but these are the only ones defined in the specifications. A full redirect URL might look like this:
+
+```
+https://app.twgtl.com/oauth-callback?code=123456789&state=foobarbaz
+```
+
+Remember that the browser is going to make an HTTP `GET` request to this URL. In order to securely complete the OAuth Authorization Code grant, you should write server-code to handle the parameters of this URL. Doing so will allow you to securely exchange the authorization `code` parameter for tokens.
+
+Let's look at how a controller accomplishes this exchange.
+
+First, we need to know the location of the OAuth server's Token endpoint. The OAuth server provides this endpoint which will validate the authorization `code` and exchange it for tokens. We are using FusionAuth as our example OAuth server and it has a consistent location for the Token endpoint.
+
+> Other OAuth servers may have a different or varying location; consult your documentation. In this example, that location will be `https://login.twgtl.com/oauth2/token`.
+
+We will need to make an HTTP `POST` request to the Token endpoint using form encoded values for a number of parameters. Here are the parameters we need to send to the Token endpoint;
+
+* `code` - this is the authorization code we are exchanging for tokens.
+
+* `client_id` - this identifies our application. In FusionAuth it is a UUID, but it could be any URL safe string.
+
+* `client_secret` - this is a secret key that is provided by the OAuth server. This should never be made public and should only ever be stored in your application on the server.
+
+* `code_verifier` - this is the code verifier value we created above and either stored in the session or in a cookie.
+
+* `grant_type` - this will always be the value `authorization_code` to let the OAuth server know we are sending it an authorization code.
+
+* `redirect_uri` - this is the redirect URI that we sent to teh OAuth server above. It must be exactly the same value.
+
+Here's some JavaScript code that calls the Token endpoint using these parameters. It also verifies the `state` parameter is correct along with the `nonce` that should be presented in the `id_token`. It also restores the saved `codeVerifier` and passes that to the Token endpoint to complete the PKCE process.
+
+```javascript
+// Dependencies
+const express = require('express');
+const crypto = require('crypto');
+const axios = require('axios');
+const FormData = require('form-data');
+const common = require ('./common');
+const config = require ('./config');
+
+// Route and OAuth variables
+const router = express.Router();
+const clientId = config.clientId;
+const clientSecret = config.clientSecret;
+const redirectURI = encodeURI('http://localhost:3000/oauth-callback');
+const scopes = encodeURIComponent('profile offline_access openid');
+
+// Crypto variables
+const password = 'setec-astronomy';
+const key = crypto.scryptSync(password, 'salt', 24);
+const iv = crypto.randomBytes(16);
+
+router.get('/oauth-callback', (req, res, next) => {
+    // Verify the state
+    const reqState = req.query.state;
+    const state = restoreState(req, res);
+    if (reqState != state) {
+        // start over
+        res.redirect('/', 302);
+        return;
+    }
+
+    const code = req.query.code;
+    const codeVerifier = restoreCodeVerifier(req, res);
+    const nonce = restoreNonce(req, res);
+
+    // POST request to Token endpoint
+    const form = new FormData();
+    form.append('client_id', clientId);
+    form.append('client_secret', clientSecret);
+    form.append('code', code);
+    form.append('code_verifier', codeVerifier);
+    form.append('grant_type', 'authorization_code');
+    form.append('redirect_uri', redirectURI);
+
+    axios.post(
+        'https://login.twgtl.com/oauth2/token,
+        form,
+        { headers: form.getHeaders() }
+    )
+    .then((response) => {
+        const accessToken = response.data.access_token;
+        const idToken = response.data.id_token;
+        const refreshToken = response.data.refresh_token;
+
+        if (idToken) {
+            /*
+                parses the JWT
+                extracts the nonce
+                compares the value expected with the value in the JWT
+            */
+            let user = common.parseJWT(idToken, nonce);
+            if (!user) {
+                console.log('Nonce is bad. it should be ' + nonce + ' but was ' + idToken.nonce);
+                // start over
+                res.redirect(302, '/');
+                return;
+            }
+        }
+
+        /*
+            Since the different OAuth modes handle the tokens
+            differently, we are going to put a placeholder
+            function here.
+        */
+        handleTokens(accessToekn, idToken, refreshToken, req, res);
+    })
+    .catch((err) => {
+        console.log("in error");
+        console.error(JSON.stringify(err));
+    });
+});
+
+function restoreState(req) {
+    // Server-side session
+    return req.session.oauthState
+}
+
+function restoreCodeVerifier(req) {
+    // Server-side session
+    return req.session.oauthCode;
+}
+
+function restoreNonce(req) {
+    // Server-side session
+    return req.session.oauthNonce;
+}
+
+module.exports = app;
+```
+
+`common.parseJWT` abstracts the JWT parsing and verification. It expects public keys to be published in JWKS format at a well known location, and verifies the audience, issuer and expiration, as well as the signature. This code can be used for access tokens, which do not have a `nonce`, and Id tokens, which do.
+
+```javascript
+const axios = require('axios');
+const FormData = require('form-data');
+const config = requrie('./config');
+const { promisify } = require('util');
+
+const common = {};
+
+const jwksUri = 'https://login.twgtl.com/.well-known/jwks.json';
+
+const jwt = require('jsonwebtoken');
+const jwksClient = require('jwks-rsa');
+const client = jwksClient({
+    strictSsl: true, // default value
+    jwksUri: jwksUri,
+    requestHeaders: {}, // optional
+    requestAgentOptions: {}, //optional
+    timeout: 30000, // defaults to 30s
+});
+
+const parseTWT = async (unverifiedToken, nonce) => {
+    const parsedJWT = jwt.decode(unverifiedToken, { complete: true });
+    const getSigningKey = promisify(client.getSigningKey).bind(client);
+    let signingKey = await getSigningKey(parsedJWT.header.kid);
+    let publicKey = signingKey.getPublicKey();
+
+    try {
+        const token = jwt.verify(
+            unverifiedToken,
+            publicKey,
+            {
+                audience: config.clientId,
+                issuer: config.issuer
+            }
+        );
+        
+        if (nonce) {
+            if (nonce !== token.nonce) {
+                console.log(`nonce doesn't match ${nonce}, ${token.nonce}`);
+                return null;
+            }
+        }
+
+        return token;
+    } catch (err) {
+        console.log(err);
+        throw err;
+    }
+}
+
+// ...
+
+module.exports = common;
+```
+
+At this point, we are completely finished with OAuth. We've successfully exchanged the authorization code for tokens, which is the last step of the OAuth Authorization Code grant.
+
+Let's take a quick look at the 3 `restore` functinos from above and how they are implemented for cookies and encrypted cookies. Here is how those functions would be implemented if we were storing the values in cookies:
+
+```javascript
+function restoreState(req, res) {
+    const value = req.cookies.oauth_state;
+    res.clearCookie('oauth_state');
+    return value;
+}
+
+function restoreCodeVerifier(req, res) {
+    const value = req.cookies.oauth_code_verifier;
+    res.clearCookie('oauth_code_verifier');
+    return value;
+}
+
+function restoreNonce(req, res) {
+    const value = req.cookies.oauth_nonce;
+    res.clearCookie('oauth_nonce');
+    return value;
+}
+```
+
+And here is the code that decrypts the encrypted cookies:
+
+```javascript
+const password = 'setec-astronomy';
+const key = crypto.scryptSync(password, 'salt', 24);
+
+function decrypt(value) {
+    const parts = value.split(':');
+    const cipherText = parts[0];
+    const iv = Buffer.from(parts[1], 'hex');
+    const decipher = crypto.createDecipheriv('aes-192-cbc', key, iv);
+    let decrypted = decipher.update(cipherText, 'hex', 'utf8');
+    decrypted += decipher.final('utf8');
+    return decrypted;
+}
+
+function restoreState(req, res) {
+    const value = decrypt(req.cookies.oauth_state);
+    res.clearCookie('oauth_state');
+    return value;
+}
+
+function restoreCodeVerifier(req, res) {
+    const value = decrypt(req.cookies.oauth_code_verifier);
+    res.clearCookie('oauth_code_verifier');
+    return value;
+}
+
+function restoreNonce(req, res) {
+    const value = decrypt(req.cookies.oauth_nonce);
+    res.clearCookie('oauth_nonce');
+    return value;
+}
+```
+
+#### Tokens
+
+Now that we've successfully exchanged the authorization code for tokens, let's look at the tokens we received from the OAuth server.
