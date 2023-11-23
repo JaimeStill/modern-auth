@@ -22,8 +22,10 @@ The goals of this repository:
     * [OAuth 2 Simplified](https://aaronparecki.com/oauth-2-simplified/)
     * [RFC 6749 - The OAuth 2.0 Authorization Framework](https://datatracker.ietf.org/doc/html/rfc6749)
 * [OpenID](https://openid.net/)
+    * [OpenID Connect Core 1.0](https://openid.net/specs/openid-connect-core-1_0.html)
 * [JSON Web Tokens (JWT)](https://jwt.io/)
-    * 
+    * [Token Expert Advice](https://fusionauth.io/articles/tokens/)
+    * [RFC 7519 - JSON Web Token (JWT)](https://datatracker.ietf.org/doc/html/rfc7519)
 * [ASP.NET Core Security](https://learn.microsoft.com/en-us/aspnet/core/security/?view=aspnetcore-8.0)
 
 

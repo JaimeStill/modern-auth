@@ -813,4 +813,47 @@ function restoreNonce(req, res) {
 
 #### Tokens
 
-Now that we've successfully exchanged the authorization code for tokens, let's look at the tokens we received from the OAuth server.
+Now that we've successfully exchanged the authorization code for tokens, let's look at the tokens we received from the OAuth server. We are going to assume that the OAuth server is using JSON Web Tokens (JWTs) for the access and Id tokens. OAuth2 doesn't define any token format, but in practice access tokens are often JWTs. OpenID Connect (OIDC), on the other hand, requires the `id_token` to be a JWT.
+
+Here are the tokens we have:
+
+* `access_token`: This is a token that contains information about the user including their id, permissions, and anything else we might need from the OAuth server. It is often, but not always, a JWT.
+
+* `id_token`: This is a JWT that contains public information about the user such as their name. This token is usually safe to store in non-secure cookies or local storage because it can't be used to call APIs on behalf of the user.
+
+* `refresh_token`: This is an opaque token (not a JWT) that can be used to create new access tokens. Access tokens expire and might need to be renewed, depending on your requirements (for example how long you want access tokens to last versus how long you want users to stay logged in).
+
+Since two of the toekns we have are JWTs, let's quickly cover the techonlogy. A full coverage of JWTs is outside of the scope of this guide, but there are a couple of good JWT guides in the [Token Expert Advice](https://fusionauth.io/articles/tokens/) section.
+
+JWTs are JSON objects that contain information about users and can also be signed. The keys of the JSON object are called *claims*. JWTs expire, but until then they can be presented to APIs and other resources to obtain access. Keep their lifetimes short and protect them as you would other credentials such as an API key. Because they are signed, a JWT can be verified to ensure it hasn't been tampered with. JWTs have a couple of standard claims. These claims are:
+
+* `aud`: The intended audience of the JWT. This is usually an identifier and your applications should verify this value is as expected.
+
+* `exp`: The expiration instant of the JWT. This is stored as teh nubmer of seconds since Epoch (January 1, 1970 UTC).
+
+* `iss`: An identifier for the system which created the JWT. This is normally a value configured in the OAuth server. Youra pplication should verify that this claim is correct.
+
+* `nbf`: The instant after which this JWT is valid. It stands for *not before*. This is tored as the number of seconds since Epoch (January 1, 1970 UTC).
+
+* `sub`: The subject of this JWT. Normally, this is the user's id.
+
+JWTs have other standard claims that you should be aware of. You can review these specifications for a list of additional standard claims:
+
+* [JWT Claims in the JSON Web Token RFC](https://tools.ietf.org/html/rfc7519#section-4)
+* [Claims in the OpenID Connect 1.0 spec](https://openid.net/specs/openid-connect-core-1_0.html#Claims)
+
+#### User and Token Information
+
+Before we cover how the Authorization Code grant is used for each of the OAuth modes, let's discuss two additional OAuth endpoints used to retrieve information about your users and their tokens. These endpoints are:
+
+* Introspection - this endpoint is an extension of the OAuth 2.0 specification and returns information about the toekn using the standard JWT claims from the previous section.
+
+* UserInfo - this endpoint is defined as part of the OIDC specification and returns information about the user.
+
+These two endpoints are quite different and serve different purposes. Though they might return similar values, the purpose of the Introspection endpoint is to return information about the access token itself. The UserInfo endpoint returns information about the user for whom the access token was granted.
+
+The Introspection endpoint gives you a lot of the same information as you could obtain by parsing and validating the `access_token`. If what is in the JWT is enough, you can choose whether to use the endpoint, which requires a network request, or parse the JWT, which incurs computational cost and requires you to bundle a library. The UserInfo endpoint, on the other hand, typically gives you the same information as the `id_token`. Again, the tradeoff is between making a network request or parsing the `id_token`.
+
+Both endpoints are simple to use; let's look at some code.
+
+##### The Introspect Endpoint
