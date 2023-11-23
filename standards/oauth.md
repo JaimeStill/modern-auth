@@ -857,3 +857,109 @@ The Introspection endpoint gives you a lot of the same information as you could 
 Both endpoints are simple to use; let's look at some code.
 
 ##### The Introspect Endpoint
+
+First, we will use the Introspect endpoint to get information about an access token. We can use the information returned from this endpoint to ensure that the access token is still valid or get the standard JWT claims covered in the previous section. Besides returning the JWT claims, this endpoint also returns a few additional claims that you can leverage in your app. These additional claims are:
+
+* `active`: Determines if the token is still active and valid. What `active` means depends on the OAuth server, but typically it means the server issued it, it hasn't been revoked as far as the server knows, and it hasn't expired.
+
+* `scope`: The list of scopes that were passed to the OAuth server during the login process and subsequently used to create the token.
+
+* `client_id`: The `client_id` value that was passed to the OAuth server during the login process.
+
+* `username`: The username of the user. This is likely the username they logged in with but could be something different.
+
+* `token_type`: The type of the token. Usually, this is `Bearer` meaning that the token belongs to and describes the users that is in control of it.
+
+Only the `active` claim is guaranteed to be included; the rest of these claims are optional and may not be provided by the OAuth server.
+
+Let's write a function that uses the Introspect endpoint to determine if the access token is still valid. This code will leverage FusionAuth's Introspect endpoint, which again is always a well-defined location:
+
+```javascript
+async function validateAccessToken(accessToken, clientId, expectedAud, expectedIss) {
+    const form = new FormData();
+    form.append('token', accessToken);
+    form.append('client_id', clientId);
+
+    try {
+        const response = await axios.post(
+            'https://login.twgtl.com/oauth2/introspect',
+            form,
+            { headers: form.getHeaders() }
+        );
+
+        if (response.status === 200) {
+            const data = response.data;
+            if (!data.active) {
+                // if not active, we don't get any other claims
+                return false;
+            }
+
+            return expectedAud === data.aud && expectedIss === data.iss;
+        }
+    } catch (err) {
+        console.log(err);
+    }
+
+    return false;
+}
+```
+
+This function makes a request to the Introspect endpoint and then parses the result, returning `true` or `false`. As you can see, you can't defer all token logic to the Introspect endpoint, however. The consumer of the access token should also validate teh `aud` and `iss` claims are as expected, at a minimum. There may be other application specific validation required as well.
+
+##### The UserInfo Endpoint
+
+If we need to get additional information about the user from the OAuth server, we can use the UserInfo endpoint. This endpoint takes the access token and returns a number of well defined claims about the user. Technically, this endpoint is part of the OIDC specification, but most OAuth servers implement it, so you'll likely be safe using it.
+
+Here are the claims that are returned by the UserInfo endpoint:
+
+Claim | Description
+------|------------
+`sub` | The unique identifier of the user
+`name` | The user's full name
+`given_name` | The user's first name
+`family_name` | The user's last name
+`middle_name` | The user's middle name
+`nickname` | The user's nickname (i.e. Joe for Joseph)
+`preferred_username` | The user's preferred username that they are using with your application
+`profile` | The URL that points to the user's profile page
+`picture` | The URL that points to an image that is the profile picture of the user
+`website` | The URL that points to the user's website (i.e. their blog)
+`email` | The user's email address
+`email_verified` | a boolean that determines if the user's email address has been verified
+`gender` | A string describing the user's gender
+`birthdate` | The user's birthdate as an ISO 8601:2004 YYYY-MM-DD formatted string
+`zoneinfo` | The time zone that the user is in
+`locale` | The user's preferred locale as an ISO 639-1 Alpha-2 language code in lowercase and an ISO 3166-1 Alpha-2 [ISO3166-1] country code in uppercase, separated by a dash
+`phone_number` | The user's telephone number
+`phone_number_verified` | A boolean that determines if the user's phone nubmer has been verified
+`address` | A JSON object that contains the user's address information
+`address.formatted` | The user's address as a fully formatted string
+`address.street_address` | The user's street address component
+`address.locality` | The user's city
+`address.region` | The user's state, province, or region
+`address.postal_code` | The user's postal code or zip code
+`address.country` | The user's country
+`updated_at` | The instant that the user's profile was last updated as a number representing the number of seconds from Epoch UTC.
+
+Not all of these claims will be present, however. What is returned depends on the scopes requested in the initial authorizaton request as well as the configuration of the OAuth server. You can always rely on the `sub` claim, though. See the [OIDC spec](https://openid.net/specs/openid-connect-core-1_0.html#ScopeClaims) as well as your OAuth server's documentation for the proper scopes and returned claims.
+
+Here's a function that we can use to retrieve a user object from the UserInfo endpoint. This is equivalent to parsing the `id_token` and looking at claims embedded there.
+
+```javascript
+async function getUserId(accessToken) {
+    const response = await axios.get(
+        'https://login.twgtl.com/oauth2/userinfo',
+        { headers: { 'Authorization' : `Bearer ${accessToken}` } }
+    )
+
+    try {
+        if (response.status === 200) {
+            return response.data;
+        }
+    } catch (err) {
+        console.log(err);
+    }
+
+    return null;
+}
+```
