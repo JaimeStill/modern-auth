@@ -368,7 +368,7 @@ Parameter | Description
 
 Here is updated code reflecting these values:
 
-```javascript
+```js
 const clientId = '9b893c2a-4689-41f8-91e0-aecad306ecb6';
 const redirectURI = encodeURI('https://app.twgtl.com/oauth-callback');
 // give the id_token and the refresh token
@@ -416,7 +416,7 @@ In order to properly implement the handling for the `state`, PKCE, and `nonce` p
 
 Here is an excerpt of the above `login` route with functions that generate these values:
 
-```javascript
+```js
 // ...
 router.get('/login', (req, res, next) => {
     const state = generateAndSaveState(req, res);
@@ -428,7 +428,7 @@ router.get('/login', (req, res, next) => {
 
 Both of these options will be covered. Here is the code for each of the `generate*` functions and server-side session storage:
 
-```javascript
+```js
 const crypto = require('crypto');
 // ...
 // Helper method for Base 64 encoding that is URL safe
@@ -468,7 +468,7 @@ This code is using the `crypto` library to generate random bytes and converting 
 
 Here's the same code (minus the require and helper methods) modified to store each of these values in secure, HTTP only cookies:
 
-```javascript
+```js
 // ...
 function generateAndSaveState(req, res) {
     const state = base64URLEncode(crypto.randomBytes(64));
@@ -595,7 +595,7 @@ We will need to make an HTTP `POST` request to the Token endpoint using form enc
 
 Here's some JavaScript code that calls the Token endpoint using these parameters. It also verifies the `state` parameter is correct along with the `nonce` that should be presented in the `id_token`. It also restores the saved `codeVerifier` and passes that to the Token endpoint to complete the PKCE process.
 
-```javascript
+```js
 // Dependencies
 const express = require('express');
 const crypto = require('crypto');
@@ -697,7 +697,7 @@ module.exports = app;
 
 `common.parseJWT` abstracts the JWT parsing and verification. It expects public keys to be published in JWKS format at a well known location, and verifies the audience, issuer and expiration, as well as the signature. This code can be used for access tokens, which do not have a `nonce`, and Id tokens, which do.
 
-```javascript
+```js
 const axios = require('axios');
 const FormData = require('form-data');
 const config = requrie('./config');
@@ -756,7 +756,7 @@ At this point, we are completely finished with OAuth. We've successfully exchang
 
 Let's take a quick look at the 3 `restore` functinos from above and how they are implemented for cookies and encrypted cookies. Here is how those functions would be implemented if we were storing the values in cookies:
 
-```javascript
+```js
 function restoreState(req, res) {
     const value = req.cookies.oauth_state;
     res.clearCookie('oauth_state');
@@ -778,7 +778,7 @@ function restoreNonce(req, res) {
 
 And here is the code that decrypts the encrypted cookies:
 
-```javascript
+```js
 const password = 'setec-astronomy';
 const key = crypto.scryptSync(password, 'salt', 24);
 
@@ -874,7 +874,7 @@ Only the `active` claim is guaranteed to be included; the rest of these claims a
 
 Let's write a function that uses the Introspect endpoint to determine if the access token is still valid. This code will leverage FusionAuth's Introspect endpoint, which again is always a well-defined location:
 
-```javascript
+```js
 async function validateAccessToken(accessToken, clientId, expectedAud, expectedIss) {
     const form = new FormData();
     form.append('token', accessToken);
@@ -945,7 +945,7 @@ Not all of these claims will be present, however. What is returned depends on th
 
 Here's a function that we can use to retrieve a user object from the UserInfo endpoint. This is equivalent to parsing the `id_token` and looking at claims embedded there.
 
-```javascript
+```js
 async function getUserId(accessToken) {
     const response = await axios.get(
         'https://login.twgtl.com/oauth2/userinfo',
@@ -965,3 +965,467 @@ async function getUserId(accessToken) {
 ```
 
 #### Local Login and Registration with the Authorization Code Grant
+
+Now that we have covered the Authorization Code grant in detail, let's look at next steps for our application code.
+
+**In other words, your application now has these tokens, what do you do with them?**
+
+If you are implementing the **Local login and registration** mode, then your application is using OAuth to log users in. This means that after the OAuth workflow is complete, the user should be logged in and the browser should be redirected to your application or the native app should have user information and render the appropriate views.
+
+For the examlpe application, we want to send the user to their ToDo list after they have logged in. In order to log the user in to the app, we need to create a session of some sort for them. Similar to the `state` and other values discussed above, there are two ways to handle this:
+
+* Cookies
+* Server-side sessions
+
+Which of these methods is best depends on your requirements, but both work well in practice and are both secure if done correctly. If you recall from above, we put a placeholder function, `handleTokens`, in our code just after we received the tokens from the OAuth server. Let's fill in that code for each of the session options.
+
+##### Storing Tokens as Cookies
+
+First, let's store the tokens as cookies in the browser and redirect the user to their ToDos:
+
+```js
+function handleTokens(accessToken, idToken, refreshToken, req, res) {
+    // write the tokens as cookies
+    res.cookie(
+        'access_token',
+        accessToken,
+        {
+            httpOnly: true,
+            secure: true
+        }
+    );
+
+    res.cookie(
+        'id_token',
+        idToken
+    );
+
+    res.cookie(
+        'refresh_token',
+        refreshToken,
+        {
+            httpOnly: true,
+            secure: true
+        }
+    );
+
+    // redirect to the todo list
+    res.redirect('/todos', 302);
+}
+```
+
+At this point, the application backend has redirected the browser to the user's ToDo list. It has also sent the access token, ID token, and refresh tokens back to the browser as cookies. The browser will now send these cookies to the backend each time it makes a request. These requests could be for JSON APIs and standard HTTP requests (i.e. `GET` and `POST`). The beauty of this solution is that our application knows the user is logged in because these cookies exist. We don't have to manage them at all since the browser does it all for us.
+
+The `id_token` is treated less securely than the `access_token` and `refresh_token` for a reason. The `id_token` should never be used to access protected resources; it is simply a way for the application to obtain read-only informatino about the user. If, for example, you want your SPA to update the user interface to greet the user by name, the `id_token` is available.
+
+These cookies also act as the session. Once the cookies disappear or become invalid, the application knows that the user is no longer logged in. Let's take a look at how these tokens can be used to make an authorized API call. You can also have server side HTML generated based on the `access_token`, but we'll leave that as an exercise for the reader.
+
+This API retrieves the user's ToDos from the database. We'll then generate the user interface in browser-side code.
+
+```js
+// include axios
+axios.get('/api/todos')
+    .then((response) => {
+        buildUI(response.data);
+        buildClickHandler();
+    })
+    .catch((error) => console.log(error));
+
+function buildUI(data) {
+    // build UI based on the todos returned and the id_token
+}
+
+function buildClickHandler() {
+    // post to API when ToDo is done
+}
+```
+
+> You may have noticed a distinct lack of any token sending code in the `axios.get` call. This is one of the strengths of the cookie approach. As long as we're calling APIs from the same domain, cookies are sent for free. If you need to send cookies to a different domain, make sure you check your CORS settings.
+
+What does the server side API look like? Here's the route that handles `/api/todos`:
+
+```js
+// dependencies
+const axios = require('axios');
+const express = require('express');
+const common = require('./common');
+const config = require('./config');
+
+// router and constants
+const router = express.Router();
+
+router.get('/', (req, res, next) => {
+    common.authorizationCheck(req, res)
+        .then((authorized) => {
+            if (!authorized) {
+                res.sendStatus(403);
+                return;
+            }
+
+            const todos = common.getTodos();
+            res.setHeader('Content-Type', 'application/json');
+            res.end(JSON.stringify(todos));
+        })
+        .catch((err) => console.log(err));
+});
+
+module.exports = router;
+```
+
+And here's the `authorizationCheck` method:
+
+```js
+const axios = ('axios');
+const FormData = require('form-data');
+const { promisify } = require('util');
+const config = require('./config');
+
+common.authorizationCheck = async (req, res) => {
+    const accessToken = req.cookies.access_token;
+
+    if (!accessToken) {
+        return false;
+    }
+
+    try {
+        let jwt = await common.parseJWT(accessToken);
+        return true;
+    } catch (err) {
+        console.log(err);
+        return false;
+    }
+}
+
+common.parseJWT = async (unverifiedToken, nonce) => {
+    const parsedJWT = jwt.decode(unverifiedToken, { complete: true });
+
+    const getSigningKey = promisify(client.getSigningKey)
+        .bind(client);
+
+    let signingKey = await getSigningKey(parsedJWT.header.kid);
+    let publicKey = signingKey.getPublicKey();
+
+    try {
+        const token = jwt.verify(
+            unverifiedToken,
+            publicKey,
+            {
+                audience: config.clientId,
+                issuer: config.issuer
+            }
+        );
+
+        if (nonce) {
+            if (nonce !== token.nonce) {
+                console.log(`nonce doesn't match ${nonce}, ${token.nonce}`);
+                return null;
+            }
+        }
+
+        return token;
+    } catch (err) {
+        console.log(err);
+        throw err;
+    }
+}
+
+module.exports = common;
+```
+
+##### Storing Tokens in the Session
+
+Next, let's look at the alternative implementation. We'll create a server-side session and store all of the tokens there. This method also uses a cookie back to the browser, but this cookie only stores the session id. Doing so allows our server-side code to look up the user's session during each request. Sessions are generally handled by the framework you are using, so we won't go into many details here. You can read up more on server-side sessions on the web if interested.
+
+Here's the code that creates a server-side session and redirects teh user to their ToDo list:
+
+```js
+var expressSession = require('express-session');
+app.use(expressSession({
+    resave: false,
+    saveUninitialized: false,
+    secret: 'setec-astronomy'
+}));
+
+function handleTokens(accessToken, idToken, refreshToken, req, res) {
+    req.session.accessToken = accessToken;
+    req.session.idToken = idToken;
+    req.session.refreshToken = refreshToken;
+
+    res.redirect('/todos', 302);
+}
+```
+
+This code stores the tokens in the server-side session and redirects the user. Now, each time the browser makes a request to the backend, the server side code can access tokens from the session.
+
+Let's update the API code from above to use the server side sessions instead of cookies:
+
+```js
+common.authorizationCheck = async (req, res) => {
+    const accessToken = req.session.accessToken;
+
+    if (!accessToken) {
+        return false;
+    }
+
+    try {
+        let jwt = await common.parseJWT(accessToken);
+        return true;
+    } catch (err) {
+        console.log(err);
+        return false;
+    }
+}
+```
+
+> The only difference in this code is how the access toekn is accessed. Above, the cookies provided it, and here the session does. Everything else is exactly the same.
+
+##### Refreshing the Access Token
+
+Finally, the code needs to be updated to handle refreshing the access token. The client, in this case a browser, is the right place to know when a request fails. It could fail for any number of reasons, such as network connectivity issues. But it might also fail because the access token has expired. In the browser code, we should check for errors and attempt to refresh the token if the failure was due to expiration.
+
+Here's the updated browser code. We are assuming the tokens are stored in cookies here. `buildAttemptRefresh` is a function that returns an error handling function. We use this construct so we can attempt a refresh any time we call the API. The `after` function is what will be called if the refresh attempt is successful. If the refresh attempt fails, we send the user back to the home page for reauthentication.
+
+```js
+const buildAttemptRefresh = function(after) {
+    return (error) => {
+        axios.post('/refresh', {})
+            .then((response) => after())
+            .catch((error) => {
+                console.log('unable to refresh tokens');
+                console.log(error);
+                window.location.href = "/";
+            })
+    }
+}
+
+const getTodos = () =>
+    axios.get('/api/todos');
+
+const after = () =>
+    getTodos()
+        .then(handleResponse)
+        .catch(console.log);
+
+getTodos()
+    .then(handleResponse)
+    .catch(buildAttemptRefresh(after));
+
+function handleResponse(response) {
+    buildUI(response.data);
+    buildClickHandler();
+}
+
+function buildUI(data) {
+    // build UI based on todos
+}
+
+function buildClickHandler() {
+    // post to API when todo is done
+}
+```
+
+Since the `refresh_token` is an HTTPOnly cookie, Javascript can't call a refresh endpoint to get a new access token. Our client side JavaScript would have to have access to the refresh token value to do so, but we don't allow that because of cross site scripting concerns. Instead, the client calls a server-side route, which will then try to refresh the tokens using the cookie value; it has access to that value. After that, the server will send down the new values as cookies, and the browser code can retry the API calls.
+
+Here's the `refresh` server side route, which accesses the refresh token and tries to refresh the access and id tokens.
+
+```js
+router.post('/refresh', async (req, res, next) => {
+    const refreshToken = req.cookies.refresh_token;
+    
+    if (!refreshToken) {
+        res.sendStatus(403);
+        return;
+    }
+
+    try {
+        const refreshedTokens = await common.refreshJWTs(refreshToken);
+
+        const newAccessToken = refreshedTokens.accessToken;
+        const newIdToken = refreshedTokens.idToken;
+
+        console.log('updating cookies');
+
+        res.cookie(
+            'access_token',
+            newAccessToken,
+            {
+                httpOnly: true,
+                secure: true
+            }
+        );
+
+        res.cookie('id_token', newIdToken);
+        res.sendStatus(200);
+        return;
+    } catch (error) {
+        console.log('unable to refresh');
+        res.sendStatus(403);
+        return;
+    }
+});
+
+module.exports = router;
+```
+
+Here's the `refreshJWT` code which actually performs the token refresh:
+
+```js
+common.refreshJWTs = async (refreshToken) => {
+    console.log('refreshing');
+
+    const form = new FormData();
+    form.append('client_id', clientId);
+    form.append('grant_type', 'refresh_token');
+    form.append('refresh_token', refreshToken);
+
+    const authValue = `Basic ${Buffer.from(clientId + ":" + clientSecret).toString('base64')}`;
+
+    const response = await axios.post(
+        'https://login.twgtl.com/oaut2/token',
+        form,
+        {
+            headers: {
+                'Authorization ' : authValue,
+                ...form.getHeaders()
+            }
+        }
+    );
+
+    const refreshedTokens = {
+        accessToken: response.data.access_token,
+        idToken: response.data.id_token
+    };
+
+    return refreshedTokens;
+}
+```
+
+By default, FusionAuth requires authenticated requests to the refresh token endpoint. In this case, the `authValue` string is a correctly formatted authentication request. Your OAuth server may have different requirements, so check your documentation.
+
+#### Third-party Login and Registration (Also Enterprise Login and Registration) with the Authorization Code Grant
+
+In the previous section we covered the **Local login and registration** process where the user is logged into the app using a self-controlled OAuth server such as FusionAuth. The other method that users can log in with is a third-party provider such as Facebook or an Enterprise system such as Active Directory. This process uses OAuth in the same way described above.
+
+> Some third-party provides have hidden some of the complexity from us by providing simple JavaScript libraries that handle the entire OAuth workflow (Facebook for example). We won't cover these types of third-party systems and instead focus on traditional OAuth workflows.
+
+In most cases, the third-party OAuth server is acting in the same way as our local OAuth server. In the end, the result is that we receive tokens that we can use to make API calls to the third party. Let's update our `handleTokens` code to call a fictitious API to retrieve the user's friend list from the third party. Here we are using sessions to store the access token and other tokens.
+
+```js
+const axios = require('axios');
+const FormData = require('form-data');
+var expressSession = require('express-session');
+
+app.use(
+    expressSession({
+        resave: false,
+        saveUninitialized: false,
+        secret: 'setec-astronomy'
+    })
+);
+
+// ...
+
+function handleTokens(accessToken, idToken, refreshToken, req, res) {
+    req.session.accessToken = accessToken;
+    req.session.idToken = idToken;
+    req.session.refreshToken = refreshToken;
+
+    axios.post(
+        'https://api.thrid-party-provider.com/profile/friends',
+        form,
+        {
+            headers: {
+                'Authorization' : `Bearer ${accessToken}`
+            }
+        }
+    )
+    .then((response) => {
+        if (response.status == 200) {
+            const json = JSON.parse(response.data);
+            req.session.friends = json.friends;
+
+            // optionally store the friends list in our database
+            storeFriends(req, json.friends);
+        }
+    });
+
+    res.redirect('/todos', 302);
+}
+```
+
+This is an example of using the access token we received from the third-party OAuth server to call an API.
+
+If you are implementing the **Third-party login and registration** mode without leveraging an OAuth server like FusinoAuth, there are a couple of things to consider:
+
+* Do you want your sessions to be the same duration as the third-party system?
+    * In most cases, if you implement **Third-party login and registration** as outlined, your users will be logged into your application for as long as the access and refresh tokens from the third-party system are valid.
+    * You can change this behavior by setting cookie or server-side expiration times you create to store the tokens.
+* Do you need to reconcile the user's information and store it in your own database?
+    * You might need to call an API in the third-party system to fetch the user's information and store it in your database. This is out of scope of this guide, but something to consider.
+
+If you use an OAuth server such as FusionAuth to manage your users and provide **Local login and registration**, it will often handle both of these items for you with little configuration and no additional coding.
+
+#### Third-party authorization with the Authorization Code Grant
+
+The last mode we will cover as part of the Authorization Code grant workflow is the **Third-party authorization** mode. For the user, this mode is the same as those above, but it requires slightly different handling of the tokens received after login. Typically with this mode, the tokens we receive from the third party need to be stored in our database because we will be making additional API calls on behalf of the user to the third party. These calls may happen long after the user has logged out of our application.
+
+In our example, we wanted to leverage the social API to send a post when the user completes a ToDo. In order to accomplish this, we need to store the access and refresh tokens we received from the social app in our database. Then, when the user completes a ToDo, we can send the post.
+
+First, let's update the `handleTokens` function to store the tokens in the database:
+
+```js
+function handleTokens(accessToken, idToken, refreshToken, req, res) {
+    // ...
+
+    // save tokens to the database
+    storeTokens(accessToken, refreshToken);
+
+    // ...
+}
+```
+
+Now that the tokens are safely stored in our database, we can retrieve them in our ToDo completion API endpoint and send the post. Here is some pseudo-code that implements this feature:
+
+```js
+const axios = require('axios');
+
+router.post('/api/todos/complete/:id', function (req, res, next) {
+    common.authorizationCheck(req, res)
+        .then((authorized) => {
+            if (!authorized) {
+                res.sendStatus(403);
+                return;
+            }
+
+            const idToUpdate = parseInt(req.params.id);
+            common.completeTodo(idToUpdate);
+
+            const socialTokens = loadSocialTokens(user);
+
+            axios.post('https://api.social.com/send', {}, {
+                headers: {
+                    auth: {
+                        bearer: socialTokens.accessToken,
+                        refresh: socialTokens.refreshToken
+                    }
+                }
+            })
+            .then((response) => {
+                // check for status, log if not 200
+            });
+
+            const todos = common.getTodos();
+            res.setheader('Content-Type', 'application/json');
+            res.end(JSON.stringify(todos));
+        });
+});
+```
+
+This code is just an example of how we might leverage the access and refresh tokens to call third-party APIs on behalf of the user. While this was a synchronous call, the code could also post asynchronously. For example, you could add an app feature to post all of the day's accomplishments to the social app every night, and the user would not have to be present, since the tokens are in the database.
+
+#### First-party Login and Registration and First-party Service Authorization
+
+These scenarios won't be illustrated in this guide. But, the short version is:
+
+* First-party login and registration should be handled by an OAuth server.
+* First-party service authorization should use tokens generated by an OAuth server. These tokens should be presented to APIs written by the same party.
