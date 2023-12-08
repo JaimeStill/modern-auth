@@ -1661,3 +1661,102 @@ For example, to maintain the integrity of any OAuth2 grant:
 ## Additional OAuth 2.0 Concepts
 
 If you read other guides to OAuth or the RFCs, you'll discover lots of other jargon. This section is designated to help you map that jargon into real world concepts you can actually use.
+
+### RFC Entity Names
+
+The RFC specifies certain entity names for certain actors in an OAuth grant. In this section, we'll look at the Authorization Code grant, but instead of using normal words like we did above, we'll use the terms from the RFC.
+
+In RFC-ese, the Authorization Code grant helps a user (also called the Resource Owner) provide a third-party application (called a Client) access to data in a different service (called the Resource Server) without sharing their credentials.
+
+Let's make it more concrete with an example.
+
+Say you wanted to print images from your Pinterest account. But:
+
+* Without downloading the images and uploading them again to a printing website
+* Without sharing your Pinterest username and password with the printing website
+
+In this case, you could authorize the printing website to have read-only access to your Pinterest photos using OAuth 2.0. You may remember this as the [Third-party service authorization mode](#third-party-service-authorization).
+
+You can do this using OAuth 2.0. Here's a diagram of the Authorization Code grant, which we previously examined, but looking at it solely from the point of third party access.
+
+```mermaid
+sequenceDiagram
+    participant browser as Browser
+    participant printer as Printing Website
+    participant login as Pinterest Login Service
+    participant photo as Pinterest Photo Service
+    browser->>printer: Click button in app, as user wants Pinterest photos
+    printer->>browser: Redirect to Pinterest
+    browser->>photo: Request photos
+    photo->>browser: Who are you? Redirect to User Login
+    browser->>login: Send the login form
+    login->>browser: Here is the login form
+    browser->>login: Present user's credentials
+    login->>browser: What scopes does the user want to grant?
+    browser->>login: User chooses scopes
+    login->>browser: Here's the authorization code and a redirect to the Printing Website
+    browser->>printer: Here's the authorization code (in the URL)
+    printer->>login: Here's an authorization code and app credentials
+    login->>printer: Here's an access token
+    printer->>printer: Stores access token
+    printer->>photo: Request photos w/ token
+    photo->>printer: Send photos
+    printer->>printer: Take action based on photos
+```
+
+A few bits of jargon:
+
+* The Pinterest Login Service is the Authorization Server (what authenticates the user).
+* The Pinterest Photo Service is the Resource Server (what holds the protected data).
+* The Printing Website is the Client (what wants access to the protected data).
+* The Browser represents the Resource Owner (who can grant access to the protected data).
+
+In these steps, the user never shares their credentials with the third-party app. Instead the app gains access based on interactions with the Authorization Server, but that Authorization Server is what confirms the user's identity.
+
+OAuth 2.0 isn't the first authentication/authorization mechanism to act on behalf of the user. Many authentication systems, including [Kerberos](https://web.mit.edu/kerberos/), operate in the same way. However OAuth 2.0 is unique because its delegated authorization framework is the first to be widely accepted and to function across the web.
+
+Like any other technical topic, there are other common concepts and jargon worth knowing. While we've touched on some of these above, we'll review them here. These include:
+
+* Scopes
+* Access Tokens
+* Client Ids
+
+### Scopes
+
+A scope is a method of restricting access. A user may want to allow an application to access the social app to read posts, but not to post. Scopes can help with this.
+
+Instead of giving applications full access to a user's account, it enables apps to request a limited scope of what they can do on the user's behalf. For example, some apps use OAuth2 to identify users and therefore only require a user Id and basic profile information. Other applications may require access to more sensitive data, like the user's birthdate or the ability to post data on the user's behalf. Scopes can represent these different levels of access. They are presented at the initial request of the Client, and then parsed and displayed to the user at the Authorization Server.
+
+Users are more likely to allow an app to gain access to personal data if they understand what exactly the app can and can't do. Scopes allow them to make informed decisions about what they consent to share with any third-party application.
+
+On the other hand, scopes matter less when the same organization controls all parts of the application or is used only for login.
+
+### Access Tokens
+
+Programs use access tokens to make requests on a user's behalf. As mentioned above, the access token denotes a particular application's permission to access certain elements of a user's data.
+
+Access tokens are, per the specification, opaque to the Client. While osme Authorization Servers generate acces tokens that have internal structure, such as JSON Web Tokens (JWTs), others do not.
+
+Access tokens must be kept private, bot in transit and at rest. Passing the token through non-encrypted channels makes it easier for replay attacks which is why it's recommended for OAuth 2.0 flows to always use TLS.
+
+### Client Ids
+
+OAuth 2.0 typically requires static, out of band initial configuration. For example, before an application can call the social API to retrieve information on behalf of a user, it must first receive approval from the social app. This process is called "Client Registration" and can be done manually or, in certain circumstances, programmatically.
+
+During Client registration, the third party application provides information like the client type, a redirect URL where the authorization code can be sent, and other related information including a website and description. The Authorization Server then generates a client Id and a client secret.
+
+Some clients can safely keep secret values such as the client secret, and are known confidential clients. Others, such as JavaScript Single Page Applications cannot, because their source code can be examined for secrets. These are known as public clients.
+
+## Conclusion
+
+As a developer, advantages of integrating OAuth2 into your application include:
+
+* Allowing you to read data about a user from another application or service without handling user credentials.
+
+* Managing the authorization process for online, desktop, and mobile apps in one standardized manner rather than creating a separate process for each type of application.
+
+* Providing consumers with more control over their data by using scopes to authorize access to certain capabilities on a case-by-case basis.
+
+* Isolating all authentication processing, allowing for additional security methods such as MFA to be implemetned without affecting any application.
+
+OAuth2 provides you with technical advantages such as a central choke point to manage, limit and control access to services. With OAuth2, you have the benefits of a standard as well. This includes a team of experts working to push the standard forward in terms of functionality and security, a wide set of libraries that work with the standard, and a population of developers who understand the protocol.
