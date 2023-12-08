@@ -23,10 +23,14 @@ The goals of this repository:
     * [RFC 6749 - The OAuth 2.0 Authorization Framework](https://datatracker.ietf.org/doc/html/rfc6749)
 * [OpenID](https://openid.net/)
     * [OpenID Connect Core 1.0](https://openid.net/specs/openid-connect-core-1_0.html)
+    * [An Illustrated Guide to OAuth and OpenID Connect](https://developer.okta.com/blog/2019/10/21/illustrated-guide-to-oauth-and-oidc)
 * [JSON Web Tokens (JWT)](https://jwt.io/)
     * [Token Expert Advice](https://fusionauth.io/articles/tokens/)
     * [RFC 7519 - JSON Web Token (JWT)](https://datatracker.ietf.org/doc/html/rfc7519)
 * [ASP.NET Core Security](https://learn.microsoft.com/en-us/aspnet/core/security/?view=aspnetcore-8.0)
+    * [Microsoft Identity Platform](https://learn.microsoft.com/en-us/entra/identity-platform/)
+    * [Microsoft Authentication Library (MSAL)](https://learn.microsoft.com/en-us/entra/msal/overview)
+    * [IdentityModel Extensions for .NET](https://github.com/AzureAD/azure-activedirectory-identitymodel-extensions-for-dotnet)
 
 
 ## Training
